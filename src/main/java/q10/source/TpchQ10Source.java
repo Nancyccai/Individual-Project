@@ -23,7 +23,7 @@ public class TpchQ10Source implements SourceFunction<UpdateEvent<?>> {
 
         Deque<LineItem> buffer = new ArrayDeque<>();
 
-        try (BufferedReader br = reader("sf1/lineitem.tbl")) {
+        try (BufferedReader br = reader("data/lineitem.tbl")) {
             String l;
             int cnt = 0;
 
@@ -62,7 +62,7 @@ public class TpchQ10Source implements SourceFunction<UpdateEvent<?>> {
     }
 
     private void readNation(SourceContext<UpdateEvent<?>> ctx) throws Exception {
-        try (BufferedReader br = reader("sf1/nation.tbl")) {
+        try (BufferedReader br = reader("data/nation.tbl")) {
             String l;
             while ((l = br.readLine()) != null) {
                 String[] f = l.split("\\|");
@@ -75,7 +75,7 @@ public class TpchQ10Source implements SourceFunction<UpdateEvent<?>> {
     }
 
     private void readCustomer(SourceContext<UpdateEvent<?>> ctx) throws Exception {
-        try (BufferedReader br = reader("sf1/customer.tbl")) {
+        try (BufferedReader br = reader("data/customer.tbl")) {
             String l;
             while ((l = br.readLine()) != null) {
                 String[] f = l.split("\\|");
@@ -93,7 +93,7 @@ public class TpchQ10Source implements SourceFunction<UpdateEvent<?>> {
     }
 
     private void readOrders(SourceContext<UpdateEvent<?>> ctx) throws Exception {
-        try (BufferedReader br = reader("sf1/orders.tbl")) {
+        try (BufferedReader br = reader("data/orders.tbl")) {
             String l;
             while ((l = br.readLine()) != null) {
                 String[] f = l.split("\\|");

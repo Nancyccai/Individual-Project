@@ -27,7 +27,7 @@ public class OutputTop20 {
         env.enableCheckpointing(2000);
 
         env.getCheckpointConfig().setCheckpointStorage(
-                new FileSystemCheckpointStorage("file:///C:/tmp/flink-checkpoints")
+                new FileSystemCheckpointStorage("file:///flink-checkpoints")
         );
 
         /* ========= Streaming Q10 (AJU) ========= */

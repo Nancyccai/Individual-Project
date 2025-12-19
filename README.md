@@ -1,587 +1,548 @@
-# TPC-H Q10 AJU Implementation - Environment Setup and Usage Guide
+# TPC-H Query 10 AJU Implementation - Complete Setup and Running Guide
 
 ## Table of Contents
-1. [Environment Requirements](#environment-requirements)
-2. [Directory Structure](#directory-structure)
-3. [Software Installation](#software-installation)
-4. [Data Generation Process](#data-generation-process)
-5. [Running the Demo](#running-the-demo)
-6. [Troubleshooting](#troubleshooting)
-7. [Configuration Options](#configuration-options)
+1. [Project Overview](#project-overview)
+2. [System Architecture](#system-architecture)
+3. [Query 10 Overview](#query-10-overview)
+4. [AJU Algorithm Core Concepts](#aju-algorithm-core-concepts)
+5. [Quick Start](#quick-start)
+6. [Detailed Setup Guide](#detailed-setup-guide)
+7. [Data Preparation](#data-preparation)
+8. [Running in IntelliJ IDEA](#running-in-intellij-idea)
+9. [Configuration Options](#configuration-options)
+10. [Code Structure Explanation](#code-structure-explanation)
 
-## Environment Requirements
 
-### Operating System
-- **Recommended**: MacOS Big Sur 11.5 or later
-- **Alternative**: Linux (Ubuntu 20.04+ or CentOS 7+)
-- **Note**: Windows is currently not supported due to shell script dependencies
+## Project Overview
 
-### Software Dependencies
+This project implements **TPC-H Query 10** using the **AJU (Acyclic Join under Updates)** algorithm based on the SIGMOD 2020 paper "Maintaining Acyclic Foreign-Key Joins under Updates". The system demonstrates efficient incremental query processing with theoretical guarantees.
 
-| Software | Version | Purpose |
-|----------|---------|---------|
-| **Java** | 1.8.0_261+ | Flink runtime and Java compilation |
-| **Scala** | 2.11.8 | Flink compatibility |
-| **Maven** | 3.6.3+ | Project build and dependency management |
-| **Python** | 3.8.5+ | Data generation scripts |
-| **Apache Flink** | 1.11.2 | Distributed stream processing engine |
-| **Google Chrome** | 91.0.4472.106+ | Web interface (optional) |
+### Key Features
+- ✅ **Incremental Processing**: Updates only affected data, not entire dataset
+- ✅ **Constant Delay Enumeration**: Immediate access to query results
+- ✅ **Theoretical Guarantees**: O(λ) update complexity where λ measures update sequence difficulty
+- ✅ **Built on Apache Flink**: Distributed, fault-tolerant stream processing
+- ✅ **Supports All TPC-H Queries**: Extensible framework for analytical workloads
+## System Architecture
 
-## Directory Structure
-
+### Architecture Diagram
 ```
-latestIP/
-├── src/main/java/q10/                    # Main source code
-│   ├── model/                           # Data model classes
-│   │   ├── Customer.java
-│   │   ├── LineItem.java
-│   │   ├── Nation.java
-│   │   ├── Order.java
-│   │   ├── Q10Result.java
-│   │   ├── Q10Update.java
-│   │   └── UpdateEvent.java
-│   ├── process/                         # Processing logic
-│   │   ├── Q10ProcessFunctionAJU.java  # Core AJU implementation
-│   │   └── Top20ProcessFunction.java   # Top-20 ranking
-│   ├── source/                          # Data sources
-│   │   └── TpchQ10Source.java          # TPC-H data generator
-│   ├── sink/                            # Output handlers
-│   │   └── OutputTop20.java
-│   ├── state/                           # State management
-│   │   ├── CustomersState.java
-│   │   ├── LineItemState.java
-│   │   ├── OrderState.java
-│   │   └── Q10JobAJU.java              # Main job coordinator
-│   └── resources/
-├── resources/data/                      # TPC-H data files
-│   ├── customer.tbl
-│   ├── lineitem.tbl
-│   ├── nation.tbl
-│   └── orders.tbl
-├── pom.xml                             # Maven build configuration
-└── README.md                           # This documentation
+┌─────────────────────────────────────────────────────────────┐
+│                     TPC-H Query 10 AJU                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐    │
+│  │  Data       │    │  Stream      │    │  Result      │    │
+│  │  Source     │───▶│  Processing  │──▶│  Output      │    │
+│  │ (TPC-H .tbl)│    │  (Flink)     │    │  (Console)   │    │
+│  └─────────────┘    └──────────────┘    └──────────────┘    │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│              Components Breakdown:                          │
+│                                                             │
+│  1. TpchQ10Source: Streams TPC-H data with updates          │
+│  2. Q10ProcessFunctionAJU: Core AJU algorithm               │
+│  3. Top20ProcessFunction: Maintains top-20 customers        │
+│  4. Q10JobAJU: Main job coordination                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Software Installation
+### Data Flow
+1. **Source Phase**: Reads TPC-H data files and simulates updates
+2. **Processing Phase**: AJU algorithm incrementally maintains join results
+3. **Output Phase**: Emits both full results and change logs
 
-### Step 1: Install Java 8
+## Query 10 Overview
 
-```bash
-# For MacOS (using Homebrew)
-brew tap AdoptOpenJDK/openjdk
-brew install adoptopenjdk8
-
-# For Ubuntu
-sudo apt-get update
-sudo apt-get install openjdk-8-jdk
-
-# Verify installation
-java -version
-# Should output: java version "1.8.0_261"
+### SQL Query (Original TPC-H Q10)
+```sql
+SELECT 
+    c_custkey,
+    c_name,
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue,
+    c_acctbal,
+    n_name,
+    c_address,
+    c_phone,
+    c_comment
+FROM 
+    customer,
+    orders,
+    lineitem,
+    nation
+WHERE 
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND o_orderdate >= '1993-10-01'
+    AND o_orderdate < '1994-01-01'
+    AND l_returnflag = 'R'
+    AND c_nationkey = n_nationkey
+GROUP BY 
+    c_custkey,
+    c_name,
+    c_acctbal,
+    c_phone,
+    n_name,
+    c_address,
+    c_comment
+ORDER BY 
+    revenue DESC
+LIMIT 20;
 ```
 
-### Step 2: Install Maven
+### Simplified AJU Implementation
+The implementation focuses on the core foreign-key join:
+- `customer` ↔ `orders` (c_custkey = o_custkey)
+- `orders` ↔ `lineitem` (o_orderkey = l_orderkey)
+- `customer` ↔ `nation` (c_nationkey = n_nationkey)
 
-```bash
-# For MacOS
-brew install maven
+## AJU Algorithm Core Concepts
 
-# For Ubuntu
-sudo apt-get install maven
+### Key Principles
+1. **Acyclic Foreign-Key Joins**: Join graph must be a DAG with foreign-key constraints
+2. **Live Tuples**: Track which tuples can produce join results
+3. **Assertion Keys**: Ensure consistency across multiple join paths
+4. **Enclosure Measure (λ)**: Quantifies update sequence difficulty
 
-# Verify installation
-mvn -v
-# Should output: Apache Maven 3.6.3
+### Update Complexity
+- **Best case (λ=1)**: O(1) update time (FIFO sequences)
+- **Worst case**: O(√|db|) update time
+- **Average case**: O(λ) where λ is typically small
+
+### Algorithm Steps
+1. **Initialization**: Build foreign-key DAG and indexes
+2. **Update Processing**: 
+   - Insert/delete triggers status changes
+   - Propagate changes through the DAG
+   - Maintain live tuple sets
+3. **Result Enumeration**: Constant-delay access to results
+
+## Quick Start
+
+### Prerequisites Check
+Before starting, ensure you have:
+- **IntelliJ IDEA** (Community or Ultimate edition)
+- **Java 11** (JDK, not just JRE)
+- **Maven 3.6+** (bundled with IntelliJ)
+- **Flink 1.17.1**
+
+### Setup (Using Pre-configured Project)
+
+1. **Download the Project**
+   ```bash
+   # Clone the repository or download ZIP
+   git clone <repository-url>
+   cd latestIP
+   ```
+
+2. **Open in IntelliJ IDEA**
+   ```
+   File → Open → Select 'latestIP' folder
+   Wait for Maven to import dependencies (auto-detected)
+   ```
+
+3. **Run Immediately**
+   ```
+   1. Navigate to: src/main/java/q10/Q10JobAJU.java
+   2. Right-click → Run 'Q10JobAJU.main()'
+   3. View results in Run console
+   ```
+
+### What You'll See
 ```
-
-### Step 3: Install Scala
-
-```bash
-# For MacOS
-brew install scala@2.11
-
-# For Ubuntu
-sudo apt-get install scala
-
-# Verify installation
-scala -version
-# Should output: Scala code runner version 2.11.8
-```
-
-### Step 4: Download and Install Apache Flink
-
-```bash
-# Download Flink 1.11.2
-wget https://archive.apache.org/dist/flink/flink-1.11.2/flink-1.11.2-bin-scala_2.11.tgz
-
-# Extract the archive
-tar -xzf flink-1.11.2-bin-scala_2.11.tgz
-
-# Navigate to Flink directory
-cd flink-1.11.2
-
-# Start Flink cluster (local mode)
-./bin/start-cluster.sh
-
-# Verify Flink is running
-# Open browser and navigate to: http://localhost:8081
-```
-
-### Step 5: Install Python 3.8+
-
-```bash
-# For MacOS
-brew install python@3.8
-
-# For Ubuntu
-sudo apt-get install python3.8 python3-pip
-
-# Verify installation
-python3 --version
-# Should output: Python 3.8.5
-```
-
-## Data Generation Process
-
-### Step 1: Obtain TPC-H Tools
-
-1. Visit the official TPC website: http://tpc.org/tpc_documents_current_versions/current_specifications5.asp
-2. Download "TPC-H_Tools_v3.0.0.zip"
-3. Extract the archive to a local directory
-
-### Step 2: Configure and Build TPC-H Generator
-
-```bash
-# Navigate to dbgen directory
-cd /path/to/TPC-H_Tools/dbgen
-
-# Copy the makefile template
-cp makefile.suite makefile
-
-# Edit makefile with appropriate settings
-# For Linux/MacOS, use these settings:
-CC      = gcc
-DATABASE= ORACLE
-MACHINE = LINUX
-WORKLOAD = TPCH
-
-# For Windows (if supported):
-# MACHINE = WIN32
-# DATABASE = SQLSERVER
-
-# Build the dbgen executable
-make
-
-# Verify the executable was created
-ls -la dbgen
-# Should see executable file: dbgen
-```
-
-### Step 3: Generate TPC-H Data
-
-```bash
-# Generate data with scale factor 5 (approximately 5GB total)
-./dbgen -s 5 -vf
-
-# The -s parameter controls the scale factor:
-# -s 1: ~1GB data
-# -s 5: ~5GB data (recommended for demo)
-# -s 10: ~10GB data
-
-# This will generate 8 .tbl files:
-# customer.tbl, lineitem.tbl, nation.tbl, orders.tbl,
-# part.tbl, partsupp.tbl, region.tbl, supplier.tbl
-```
-
-### Step 4: Prepare Data for AJU Demo
-
-```bash
-# Create data directory in the project
-mkdir -p latestIP/src/main/resources/data
-
-# Copy only the needed tables for Q10
-cp /path/to/TPC-H_Tools/dbgen/customer.tbl latestIP/src/main/resources/data/
-cp /path/to/TPC-H_Tools/dbgen/lineitem.tbl latestIP/src/main/resources/data/
-cp /path/to/TPC-H_Tools/dbgen/nation.tbl latestIP/src/main/resources/data/
-cp /path/to/TPC-H_Tools/dbgen/orders.tbl latestIP/src/main/resources/data/
-
-# Verify file sizes (scale factor 5)
-ls -lh latestIP/src/main/resources/data/
-# Expected:
-# -rw-r--r--  1 user  staff   113M Jan 1 12:00 customer.tbl
-# -rw-r--r--  1 user  staff   2.9G Jan 1 12:00 lineitem.tbl
-# -rw-r--r--  1 user  staff   2.3K Jan 1 12:00 nation.tbl
-# -rw-r--r--  1 user  staff   1.1G Jan 1 12:00 orders.tbl
-```
-
-### Data File Formats
-
-**nation.tbl (example):**
-```
-0|ALGERIA|0| haggle. carefully final deposits detect slyly agai
-1|ARGENTINA|1|al foxes promise slyly according to the regular accounts. bold requests alon
-2|BRAZIL|1|y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special 
-```
-
-**customer.tbl (example):**
-```
-1|Customer#000000001|IVhzIApeRb ot,c,E|15|25-989-741-2988|711.56|BUILDING|to the even, regular platelets. regular, ironic epitaphs nag e
-2|Customer#000000002|XSTf4,NCwDVaWNe6tEgvwfmRchLXak|13|23-768-687-3665|121.65|AUTOMOBILE|l accounts. blithely ironic theodolites integrate boldly: caref
-```
-
-**orders.tbl (example):**
-```
-1|36901|O|173665.47|1996-01-02|5-LOW|Clerk#000000951|0|nstructions sleep furiously among 
-2|78002|O|46929.18|1996-12-01|1-URGENT|Clerk#000000880|0| foxes. pending accounts at the pending, silent asymptot
-```
-
-**lineitem.tbl (example):**
-```
-1|1552|106170|1|17|24710.35|0.04|0.02|N|O|1996-03-13|1996-02-12|1996-03-22|DELIVER IN PERSON|TRUCK|egular courts above the
-1|67|107140|2|36|13309.60|0.09|0.06|N|O|1996-04-12|1996-02-28|1996-04-20|TAKE BACK RETURN|MAIL|ly final dependencies: slyly bold 
-```
-
-## Running the Demo
-
-### Step 1: Build the Project
-
-```bash
-# Navigate to project root
-cd latestIP
-
-# Build the project using Maven
-mvn clean package
-
-# Expected output:
-# [INFO] Building jar: /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar
-# [INFO] BUILD SUCCESS
-
-# Verify the JAR file was created
-ls -lh target/*.jar
-```
-
-### Step 2: Start Flink Cluster
-
-```bash
-# Navigate to Flink installation directory
-cd /path/to/flink-1.11.2
-
-# Start Flink in local mode
-./bin/start-cluster.sh
-
-# Check if Flink is running
-./bin/flink list
-# Should show no running jobs initially
-
-# Monitor Flink Web UI: http://localhost:8081
-```
-
-### Step 3: Run the AJU Job
-
-```bash
-# Submit the job to Flink
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar \
-  --parallelism 1
-
-# Alternative: Run with custom parameters
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar \
-  --parallelism 4 \
-  --windowSize 50000 \
-  --warmupInsert 100000
-```
-
-### Step 4: Monitor Job Execution
-
-```bash
-# Monitor job status
-./bin/flink list
-# Output: RUNNING or FINISHED
-
-# View Flink Web UI for detailed metrics:
-# 1. Open browser to http://localhost:8081
-# 2. Click on "Running Jobs"
-# 3. Select your job to see:
-#    - Throughput metrics
-#    - State size
-#    - Task manager details
-#    - Watermark progression
-
-# Check job logs
-tail -f /path/to/flink-1.11.2/log/flink-*.out
-```
-
-### Step 5: View Results
-
-The job produces two output streams:
-
-1. **Top-20 Results** (printed to console):
-```
-TOP20> Q10Result{custKey=12345, name='Customer#000012345', ... revenue=56789.12}
 TOP20> Q10Result{custKey=67890, name='Customer#000067890', ... revenue=45678.90}
-...
+Q10-CHANGELOG> Q10Update{custKey=12345, delta=6789.12, kind=UPDATE}
 ```
 
-2. **Change Log** (printed to console):
-```
-Q10-CHANGELOG> Q10Update{custKey=12345, oldRevenue=50000.0, newRevenue=56789.12, delta=6789.12, kind=UPDATE}
-```
+## Detailed Setup Guide
 
-## Running with Different Configurations
+### Software Requirements
 
-### Configuration via Command Line
+| Software | Minimum Version | Recommended Version | Installation Guide |
+|----------|-----------------|---------------------|-------------------|
+| **IntelliJ IDEA** | 2021.3 | 2023.2 | [Download](https://www.jetbrains.com/idea/download/) |
+| **Java JDK** | 1.8.0_261 | 11.0.20 | [Oracle JDK](https://www.oracle.com/java/technologies/javase-downloads.html) or [OpenJDK](https://adoptium.net/) |
+| **Apache Maven** | 3.6.3 | 3.9.4 | [Download](https://maven.apache.org/download.cgi) |
+| **Apache Flink** | 1.11.2 | 1.17.1 | [Download](https://flink.apache.org/downloads.html) |
 
-```bash
-# Basic run with default parameters
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
 
-# Run with increased parallelism
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 4
+### Dependencies in pom.xml
 
-# Run with custom data parameters
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar \
-  --windowSize 200000 \
-  --warmupInsert 400000 \
-  --scaleFactor 10
-
-# Run in detached mode
-./bin/flink run -d -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
-```
-
-### Configuration via Environment Variables
-
-```bash
-# Set environment variables before running
-export FLINK_PARALLELISM=4
-export WINDOW_SIZE=100000
-export WARMUP_INSERT=200000
-
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
-```
-
-## Performance Testing
-
-### Run with Different Scale Factors
-
-```bash
-# Test with small dataset (debug)
-./dbgen -s 0.1 -vf
-cp *.tbl latestIP/src/main/resources/data/
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
-
-# Test with medium dataset
-./dbgen -s 1 -vf
-cp *.tbl latestIP/src/main/resources/data/
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 2
-
-# Test with large dataset
-./dbgen -s 10 -vf
-cp *.tbl latestIP/src/main/resources/data/
-./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 8
+The project uses these key dependencies:
+```xml
+<dependencies>
+    <!-- Flink Streaming API -->
+    <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-streaming-java</artifactId>
+        <version>1.17.1</version>
+    </dependency>
+    
+    <!-- Flink Client -->
+    <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-clients</artifactId>
+        <version>1.17.1</version>
+    </dependency>
+    
+    <!-- Logging -->
+    <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-simple</artifactId>
+        <version>1.7.36</version>
+    </dependency>
+</dependencies>
 ```
 
-### Monitor Resource Usage
+## Data Preparation
 
-```bash
-# Monitor CPU usage
-top -o cpu
+### Option 1: Use Provided Sample Data
 
-# Monitor memory usage
-jstat -gc <flink_pid> 1000
-
-# Monitor disk I/O
-iostat -x 1
-
-# Monitor network
-iftop -i lo0
+The project includes small sample data files(scale factor = 0.01) in:
+```
+src/main/resources/data/
+├── customer.tbl    
+├── lineitem.tbl  
+├── nation.tbl   
+└── orders.tbl  
 ```
 
-## Troubleshooting
+### Option 2: Generate Larger TPC-H Dataset
 
-### Common Issues and Solutions
+If you need larger data for performance testing:
 
-#### Issue 1: Java Version Mismatch
-```
-Error: Unsupported major.minor version 52.0
-```
-**Solution:**
-```bash
-# Ensure Java 8 is being used
-java -version
-# Should show 1.8.x
+1. **Clone TPC-H Generator**
+   ```bash
+   # Clone from GitHub (easier than official TPC website)
+   git clone https://github.com/electrum/tpch-dbgen.git
+   cd tpch-dbgen
+   ```
 
-# Set JAVA_HOME explicitly
-export JAVA_HOME=$(/usr/libexec/java_home -v 1.8)
-```
+2. **Compile the Generator**
+   ```bash
+   # Simple compilation
+   make
+   
+   # If make fails, try:
+   gcc -O3 -o dbgen dbgen.c -lm
+   ```
 
-#### Issue 2: Flink Cluster Not Starting
-```
-Error: Could not start Flink cluster
-```
-**Solution:**
-```bash
-# Check if port 8081 is already in use
-lsof -i :8081
+3. **Generate Data**
+   ```bash
+   # Generate 1GB dataset (scale factor 1)
+   ./dbgen -s 1
+   
+   # Scale factors:
+   # -s 0.1  # 100MB (good for testing)
+   # -s 1    # 1GB (default)
+   # -s 5    # 5GB (for performance testing)
+   # -s 10   # 10GB (for large-scale testing)
+   ```
 
-# Kill existing process if needed
-kill -9 <pid>
+4. **Copy to Project**
+   ```bash
+   # Copy generated files to project
+   cp customer.tbl lineitem.tbl nation.tbl orders.tbl \
+      /path/to/latestIP/src/main/resources/data/
+   
+   # Or replace if files exist
+   mv customer.tbl /path/to/latestIP/src/main/resources/data/
+   mv lineitem.tbl /path/to/latestIP/src/main/resources/data/
+   mv nation.tbl /path/to/latestIP/src/main/resources/data/
+   mv orders.tbl /path/to/latestIP/src/main/resources/data/
+   ```
 
-# Start with clean state
-./bin/stop-cluster.sh
-rm -rf /tmp/flink-*
-./bin/start-cluster.sh
-```
+## Running in IntelliJ IDEA
 
-#### Issue 3: Out of Memory Errors
-```
-java.lang.OutOfMemoryError: Java heap space
-```
-**Solution:**
-```bash
-# Increase heap size in Flink configuration
-# Edit flink-1.11.2/conf/flink-conf.yaml
+### Method 1: Direct Run (Simplest)
 
-# Add or modify:
-taskmanager.memory.process.size: 4096m
-jobmanager.memory.process.size: 2048m
+1. **Open Main Class**
+   ```
+   Navigate to: src/main/java/q10/Q10JobAJU.java
+   ```
 
-# Restart Flink
-./bin/stop-cluster.sh
-./bin/start-cluster.sh
-```
+2. **Run the Program**
+   ```
+   Right-click → Run 'Q10JobAJU.main()'
+   ```
 
-#### Issue 4: Data Generation Issues
-```
-dbgen: command not found
-```
-**Solution:**
-```bash
-# Ensure makefile is properly configured
-cd /path/to/TPC-H_Tools/dbgen
-make clean
-make
+3. **Monitor Output**
+   ```
+   Console shows:
+   - Processing progress
+   - Top-20 customer results
+   - Change log updates
+   - Execution time
+   ```
 
-# Check for compilation errors
-gcc --version
-# Should be 4.8+ for Linux, clang for MacOS
-```
+### Method 2: Maven Execution
 
-#### Issue 5: Missing Data Files
-```
-java.io.FileNotFoundException: data/customer.tbl
-```
-**Solution:**
-```bash
-# Ensure data files are in correct location
-ls -la src/main/resources/data/
+1. **Run via Maven Plugin**
+   ```
+   Maven tool window → Plugins → exec → exec:java
+   Double-click to run
+   ```
 
-# If using IDE, mark resources directory
-# For IntelliJ: File -> Project Structure -> Modules -> Mark as Resources
-```
+2. **Build and Package**
+   ```
+   Maven → Lifecycle → package
+   Creates: target/q10-1.0.jar
+   ```
 
-### Debug Mode
+### Run with Standalone Flink Cluster
 
-```bash
-# Run Flink job with debug logging
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  q10-aju-1.0-SNAPSHOT.jar \
-  --logLevel DEBUG
+1. **Download and Start Flink**
+   ```bash
+   # Download Flink (if not installed)
+   wget https://archive.apache.org/dist/flink/flink-1.17.1/flink-1.17.1-bin-scala_2.12.tgz
+   tar -xzf flink-1.17.1-bin-scala_2.12.tgz
+   cd flink-1.17.1
+   
+   # Start cluster
+   ./bin/start-cluster.sh
+   
+   # Verify cluster is running
+   # Open browser: http://localhost:8081
+   ```
 
-# Check detailed logs
-tail -f /path/to/flink-1.11.2/log/flink-*.log
+2. **Submit Job to Flink**
+   ```bash
+   # Submit the job
+   ./bin/flink run \
+     -c q10.Q10JobAJU \
+     /path/to/latestIP/target/q10-1.0.jar
+   
+   # With custom parallelism
+   ./bin/flink run \
+     -c q10.Q10JobAJU \
+     /path/to/latestIP/target/q10-1.0.jar \
+     --parallelism 4
+   ```
 
-# Enable remote debugging
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  q10-aju-1.0-SNAPSHOT.jar \
-  -Denv.java.opts="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"
-```
+3. **Monitor Job**
+   ```bash
+   # List running jobs
+   ./bin/flink list
+   
+   # View job details
+   # Visit: http://localhost:8081
+   
+   # Cancel job
+   ./bin/flink cancel <job-id>
+   ```
 
 ## Configuration Options
 
 ### Runtime Parameters
 
-| Parameter | Default | Description | Command Line Argument |
-|-----------|---------|-------------|----------------------|
-| `parallelism` | 1 | Number of parallel task slots | `--parallelism 4` |
-| `windowSize` | 100000 | FIFO window size for LineItems | `--windowSize 200000` |
-| `warmupInsert` | 200000 | Initial LineItems to insert | `--warmupInsert 400000` |
-| `scaleFactor` | 5 | TPC-H scale factor (data size) | `--scaleFactor 10` |
-| `logLevel` | INFO | Logging level (DEBUG, INFO, WARN) | `--logLevel DEBUG` |
-| `checkpointInterval` | 60000 | Fault tolerance checkpoint interval (ms) | `--checkpointInterval 30000` |
+| Parameter | Default | Description | Usage Example |
+|-----------|---------|-------------|---------------|
+| `windowSize` | 100000 | FIFO window size for LineItems | `--windowSize 50000` |
+| `warmupInsert` | 200000 | Initial LineItems to insert | `--warmupInsert 100000` |
+| `parallelism` | 1 | Flink parallelism level | `--parallelism 4` |
+| `logLevel` | INFO | Logging level (DEBUG, INFO, WARN, ERROR) | `--logLevel DEBUG` |
+| `checkpointInterval` | 60000 | Checkpoint interval in milliseconds | `--checkpointInterval 30000` |
 
 ### Memory Configuration
 
+For large datasets, adjust memory settings:
+
+**In IntelliJ Run Configuration:**
+```
+VM options: -Xmx4g -Xms2g -XX:MaxMetaspaceSize=512m
+```
+
+**In pom.xml (for Maven):**
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-surefire-plugin</artifactId>
+    <configuration>
+        <argLine>-Xmx2g -XX:MaxPermSize=256m</argLine>
+    </configuration>
+</plugin>
+```
+
+**For Flink cluster (flink-conf.yaml):**
 ```yaml
-# flink-conf.yaml modifications for optimal performance
 taskmanager.memory.process.size: 4096m
-taskmanager.numberOfTaskSlots: 4
+taskmanager.memory.managed.size: 2048m
 jobmanager.memory.process.size: 2048m
-
-# For large datasets (scale factor 10+)
-taskmanager.memory.process.size: 8192m
-taskmanager.memory.managed.size: 4096m
 ```
 
-### Performance Tuning
+### Performance Tuning Tips
 
-```bash
-# Optimize for throughput
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  q10-aju-1.0-SNAPSHOT.jar \
-  --bufferTimeout 0 \
-  --parallelism $(nproc)
+1. **For Small Datasets (<1GB)**
+   ```bash
+   java -Xmx2g -Xms1g -jar q10-aju-1.0-SNAPSHOT.jar --parallelism 1
+   ```
 
-# Optimize for low latency
-./bin/flink run \
-  -c q10.Q10JobAJU \
-  q10-aju-1.0-SNAPSHOT.jar \
-  --bufferTimeout 10 \
-  --parallelism 1
+2. **For Medium Datasets (1-10GB)**
+   ```bash
+   java -Xmx8g -Xms4g -jar q10-aju-1.0-SNAPSHOT.jar --parallelism 4
+   ```
+
+3. **For Large Datasets (>10GB)**
+   ```bash
+   # Use Flink cluster with multiple task managers
+   ./bin/flink run -p 8 -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
+   ```
+## Code Structure Explanation
+
+### Core Classes
+
+#### 1. `Q10JobAJU.java` - Main Job Coordinator
+```java
+// Main entry point
+public class Q10JobAJU {
+    public static void main(String[] args) throws Exception {
+        // 1. Setup Flink environment
+        // 2. Create data source stream
+        // 3. Apply AJU processing function
+        // 4. Output results to console
+    }
+}
 ```
 
-## Quick Start Summary
+**Key Responsibilities:**
+- Flink execution environment setup
+- Stream topology definition
+- Job configuration and execution
 
-### For First-Time Users
-
-```bash
-# 1. Install dependencies
-brew install java8 maven scala
-
-# 2. Download and start Flink
-wget https://archive.apache.org/dist/flink/flink-1.11.2/flink-1.11.2-bin-scala_2.11.tgz
-tar -xzf flink-1.11.2-bin-scala_2.11.tgz
-cd flink-1.11.2
-./bin/start-cluster.sh
-
-# 3. Generate TPC-H data
-cd /path/to/TPC-H_Tools/dbgen
-make
-./dbgen -s 1 -vf
-cp customer.tbl lineitem.tbl nation.tbl orders.tbl /path/to/latestIP/src/main/resources/data/
-
-# 4. Build and run the demo
-cd /path/to/latestIP
-mvn clean package
-cd /path/to/flink-1.11.2
-./bin/flink run -c q10.Q10JobAJU /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar
-
-# 5. Monitor results
-# Check console output or visit http://localhost:8081
+#### 2. `Q10ProcessFunctionAJU.java` - Core AJU Algorithm
+```java
+public class Q10ProcessFunctionAJU 
+        extends KeyedProcessFunction<Long, UpdateEvent<?>, Q10Result> {
+    
+    // State management for AJU
+    private MapState<Long, Customer> customers;
+    private MapState<Long, Nation> nations;
+    private MapState<Long, Long> orderCustomer;
+    private MapState<Long, Double> orderRevenue;
+    private MapState<Long, Boolean> orderAlive;
+    
+    @Override
+    public void processElement(UpdateEvent<?> evt, ...) {
+        // AJU algorithm implementation
+        // 1. Handle dimension updates (customer, nation)
+        // 2. Handle fact updates (orders, lineitem)
+        // 3. Maintain live tuple status
+        // 4. Emit result updates
+    }
+}
 ```
 
-### Estimated Time Requirements
+**AJU State Management:**
+- **Live Tuples**: Track which tuples can produce join results
+- **Counters**: Maintain counts of live child tuples
+- **Revenue Aggregation**: Incrementally update revenue totals
 
-| Step | Time Estimate | Disk Space |
-|------|---------------|------------|
-| Software Installation | 15-30 minutes | 2GB |
-| TPC-H Data Generation (scale 5) | 5-10 minutes | 5GB |
-| Project Build | 2-3 minutes | 500MB |
-| Job Execution (scale 5) | 10-20 minutes | 1GB heap |
+**Algorithm Logic:**
+1. **LineItem Insertion**:
+   - Update order revenue
+   - Check if order becomes alive (first live lineitem)
+   - Propagate to customer if order status changes
 
-This setup guide provides all necessary steps to run the TPC-H Q10 AJU implementation from scratch. The system demonstrates efficient incremental query maintenance with theoretical guarantees while being practical for real-world streaming scenarios.
+2. **LineItem Deletion**:
+   - Update order revenue
+   - Check if order becomes dead (no live lineitems)
+   - Propagate to customer if order status changes
+
+3. **Order Alive Logic**:
+   - Order is "alive" if it has at least one lineitem with returnFlag='R'
+   - Customer revenue aggregates only from alive orders
+
+#### 3. `TpchQ10Source.java` - Data Source
+```java
+public class TpchQ10Source implements SourceFunction<UpdateEvent<?>> {
+    
+    @Override
+    public void run(SourceContext<UpdateEvent<?>> ctx) {
+        // Two-phase simulation:
+        // Phase 1: Insert warmup data
+        // Phase 2: FIFO sliding window
+    }
+}
+```
+
+**Update Simulation Strategy:**
+- **Warmup Phase**: Insert initial set of lineitems
+- **Steady State**: FIFO sliding window (insert new, delete oldest)
+- **Realistic Workload**: Simulates continuous data streams
+
+#### 4. `Top20ProcessFunction.java` - Result Aggregation
+```java
+public class Top20ProcessFunction 
+        extends KeyedProcessFunction<Integer, Q10Result, String> {
+    
+    @Override
+    public void processElement(Q10Result r, ...) {
+        // Maintain top-20 customers by revenue
+        // Periodic emission of current top-20
+    }
+}
+```
+
+**Features:**
+- Periodic emission (every 20,000 updates)
+- Maintains live customer set with revenue
+- Sorts and outputs top-20 customers
+
+### Package Structure
+```
+src/main/java/q10/
+├── Q10JobAJU.java                    # Main job entry point
+├── model/                           # Data models
+│   ├── Customer.java
+│   ├── LineItem.java
+│   ├── Nation.java
+│   ├── Order.java
+│   ├── Q10Result.java              # Query result format
+│   ├── Q10Update.java              # Update notification format
+│   └── UpdateEvent.java            # Generic update wrapper
+├── process/                         # Processing functions
+│   ├── Q10ProcessFunctionAJU.java  # Core AJU algorithm
+│   ├── Top20ProcessFunction.java   # Top-20 maintenance
+│   └── Top20ProcessFunction3attritubes.java  # Alternative
+├── sink/                           # Output sinks
+│   └── OutputTop20.java
+├── source/                         # Data sources
+│   └── TpchQ10Source.java
+└── state/                          # State management
+    ├── Q10Job.java
+    └── Q10JobAIU.java
+```
+
+### Key AJU Concepts in This Implementation
+
+#### 1. **Foreign-Key Acyclic Graph**
+```
+customer (c_custkey) ← orders (o_custkey)
+  ↓
+nation (n_nationkey)   orders (o_orderkey) ← lineitem (l_orderkey)
+```
+
+### Resources
+- **AJU Paper**: ["Maintaining Acyclic Foreign-Key Joins under Updates" (SIGMOD 2020)](https://dl.acm.org/doi/10.1145/3318464.3380586)
+- **Flink Documentation**: https://flink.apache.org/
+- **TPC-H Specification**: http://www.tpc.org/tpch/
+
+## Conclusion
+
+This implementation demonstrates the AJU algorithm's ability to efficiently maintain TPC-H Query 10 results under updates. The system provides:
+
+- ✅ **Easy Setup**: Runs in IntelliJ with one click
+- ✅ **Flexible Deployment**: Embedded or standalone Flink
+- ✅ **Scalable Performance**: Handles GB-scale datasets
+- ✅ **Research Value**: Implements cutting-edge incremental processing
+
+To get started immediately:
+1. Open `Q10JobAJU.java` in IntelliJ
+2. Click the green run button
+3. Observe real-time query results
+
+---
+
+*Last Updated: December 2024*  
+*Version: 1.0*  
+*Compatibility: Java 8/11, Flink 1.11-1.17, IntelliJ 2025.3+*

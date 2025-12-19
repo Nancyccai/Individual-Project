@@ -1,0 +1,26 @@
+
+================== TPCH Q10 TOP-20 ==================
+Rank | custKey    | name                      | revenue      | acctBal    | nation          | address              | phone           | comment
+---------------------------------------------------------------------------------------------------------------------------------
+1    | 11453      | Customer#000011453        | 348340.11    | -980.66    | MOROCCO         | ywzse4rNLHG          | 25-564-617-2282 | to beans haggle blithely slyly unusual ideas. furious
+2    | 81211      | Customer#000081211        | 346848.46    | 5225.48    | JORDAN          | xoJZrVP 6Q0l1MhRgJjwUj8qrGiu | 23-397-944-1364 | accounts grow. furiously pending pi
+3    | 113066     | Customer#000113066        | 342374.50    | 2908.44    | PERU            | D9R3X0sn1mAFRM0RoAa PjuwnkBxSgwIioA | 27-452-491-5005 |  blithely permanent ideas since the regular requests will have to are above the special instructio
+4    | 101039     | Customer#000101039        | 311809.25    | 4218.46    | IRAQ            | rRB,qftqOQWQLDgOSuN06Ia | 21-931-720-4753 | haggle furiously. carefully unusual asymptotes boost. bold requ
+5    | 18280      | Customer#000018280        | 308252.29    | 7982.90    | KENYA           | WE8YUgQRGAM6pcwCHZk  | 24-920-237-3591 | express deposits haggle. fluffily quick pinto beans cajole furio
+6    | 91931      | Customer#000091931        | 300097.71    | 9962.30    | SAUDI ARABIA    | FIFWNOlWdjV lqJZjco6h5c9W6BT3FF4r | 30-555-247-4945 | the blithely pending accounts. blithely regular accounts among 
+7    | 99649      | Customer#000099649        | 298340.03    | 3202.74    | MOZAMBIQUE      | mU RBQcej6DT6RxefY98FKzLJfrSVhj | 26-915-814-4201 | furiously. carefully pending deposits cajole furious
+8    | 84769      | Customer#000084769        | 298044.56    | 9299.76    | FRANCE          | 7Z,bRR8dc9aE9e 78m60bzEs | 16-117-340-6177 |  the silent asymptotes-- slyly regular accounts wake. fluffily blithe instructions a
+9    | 101881     | Customer#000101881        | 294225.74    | 6079.37    | GERMANY         | tL1pcOAps0HMi4yqsQulDoQ k,ji | 17-218-889-1496 | excuses haggle stealthily furiously express pa
+10   | 115021     | Customer#000115021        | 292011.47    | 5823.18    | FRANCE          | PH6cyyexOokNIq1OxQIeZNX3CD4H | 16-703-909-6794 | ravely even deposits sleep furiously
+11   | 4963       | Customer#000004963        | 290439.24    | 4131.22    | ETHIOPIA        | l2qUZzmp l,BHY8cRId2g7I2wcU9lBF | 15-304-359-6322 | counts boost along the dependencies. bold platelets wake. blithe packages wake blithely
+12   | 132799     | Customer#000132799        | 288148.15    | 9748.34    | MOROCCO         | oQfDg9d6mUyAySpwQHr8dMhryYc | 25-532-758-4065 | haggle slyly ironic foxes. requests serve carefully across the ironic deposits. blithely ironic court
+13   | 71713      | Customer#000071713        | 287364.05    | 6041.62    | ALGERIA         | D YfFtkqN5gkKtU3AHPLpkNBuKH7DrJsMY4WVF4V | 10-751-436-2430 |  dogged courts. furiously regular packages are furiously. packag
+14   | 45628      | Customer#000045628        | 277919.88    | 9495.85    | GERMANY         | x0Zk8UCSCV           | 17-251-497-3072 | l deposits sleep blithely. ironic, even packages boost stealthily. stealt
+15   | 56131      | Customer#000056131        | 277310.99    | 6871.08    | ARGENTINA       | UlwK6ZNgmAOYQkUpe    | 11-364-797-6030 | asymptotes. carefully ironic packages sleep. stealthily unusual decoys sleep furiously. ideas nag with the fray
+16   | 17314      | Customer#000017314        | 270121.00    | 7412.85    | MOZAMBIQUE      | Jr8b9 sAjav0Hetg2L6XMKuLgXbgq | 26-704-258-5026 |  against the pending deposits solve carefully accor
+17   | 134260     | Customer#000134260        | 262571.17    | 3954.80    | ROMANIA         | H2RAp1yVixDQU8JsOJc K13nbmJTrhTOgdNQqBUT | 29-608-203-4783 |  slyly according to the carefully regular pearls-- slowly regular court
+18   | 144764     | Customer#000144764        | 259455.45    | 3396.83    | PERU            | 0ADnptg9xdO4X5W1zfzku2O7OTUcH49 JLOp | 27-860-708-5730 | atelets are according to the ironic requests. special accounts integrate among th
+19   | 58415      | Customer#000058415        | 257493.40    | 7022.62    | ROMANIA         | feVbVeUKBd9 pGVAHx6rzpZVeEhAoxbCV ZOR4sg | 29-643-432-8300 | ve the fluffily final courts. bl
+20   | 88312      | Customer#000088312        | 252961.40    | 18.46      | BRAZIL          | Y9CfRauBOYBfUWUJS    | 12-501-601-5598 | s. slyly special excuses use along the flu
+=====================================================
+

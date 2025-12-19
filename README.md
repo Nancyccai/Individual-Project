@@ -1,504 +1,587 @@
-# TPC-H Query 10 - AJU Implementation
+# TPC-H Q10 AJU Implementation - Environment Setup and Usage Guide
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Data Flow](#data-flow)
-4. [AJU Algorithm Implementation](#aju-algorithm-implementation)
-5. [Data Generation Process](#data-generation-process)
-6. [Performance Characteristics](#performance-characteristics)
-7. [Usage Guide](#usage-guide)
-8. [Technical Details](#technical-details)
+1. [Environment Requirements](#environment-requirements)
+2. [Directory Structure](#directory-structure)
+3. [Software Installation](#software-installation)
+4. [Data Generation Process](#data-generation-process)
+5. [Running the Demo](#running-the-demo)
+6. [Troubleshooting](#troubleshooting)
+7. [Configuration Options](#configuration-options)
 
-## Overview
+## Environment Requirements
 
-This project implements **TPC-H Query 10** using the **AJU (Acyclic Join under Updates)** algorithm, based on the SIGMOD 2020 paper "Maintaining Acyclic Foreign-Key Joins under Updates". The system provides incremental maintenance of query results with constant-delay enumeration under arbitrary updates.
+### Operating System
+- **Recommended**: MacOS Big Sur 11.5 or later
+- **Alternative**: Linux (Ubuntu 20.04+ or CentOS 7+)
+- **Note**: Windows is currently not supported due to shell script dependencies
 
-### Key Features
-- **Incremental Processing**: Only processes changes (deltas) instead of recomputing entire results
-- **Constant-Delay Enumeration**: Immediate access to query results after updates
-- **Distributed Execution**: Built on Apache Flink for scalability and fault tolerance
-- **Theoretical Guarantees**: Update complexity depends on enclosures measure (λ)
+### Software Dependencies
 
-## Architecture
+| Software | Version | Purpose |
+|----------|---------|---------|
+| **Java** | 1.8.0_261+ | Flink runtime and Java compilation |
+| **Scala** | 2.11.8 | Flink compatibility |
+| **Maven** | 3.6.3+ | Project build and dependency management |
+| **Python** | 3.8.5+ | Data generation scripts |
+| **Apache Flink** | 1.11.2 | Distributed stream processing engine |
+| **Google Chrome** | 91.0.4472.106+ | Web interface (optional) |
 
-### System Architecture Diagram
-
-```mermaid
-graph TB
-    subgraph "Source Layer"
-        F1[customer.tbl] --> SRC
-        F2[nation.tbl] --> SRC
-        F3[orders.tbl] --> SRC
-        F4[lineitem.tbl] --> SRC
-        SRC[TpchQ10Source] -->|UpdateEvent Stream| STREAM
-    end
-    
-    subgraph "Processing Layer"
-        STREAM --> KEY[KeyBy Operation]
-        KEY --> PROC[Q10ProcessFunctionAJU]
-        
-        subgraph "AJU State Management"
-            PROC --> DIM[Dimension States]
-            PROC --> ALIVE[Alive Tuple States]
-            PROC --> AGG[Aggregation States]
-            
-            DIM --> CUST[Customer MapState]
-            DIM --> NATION[Nation MapState]
-            
-            ALIVE --> ORDER_ALIVE[orderAlive Map]
-            ALIVE --> LINE_COUNT[liveLineItemCount]
-            ALIVE --> ORDER_COUNT[liveOrderCount]
-            
-            AGG --> ORDER_REV[orderRevenue Map]
-            AGG --> CUST_REV[customerRevenue Map]
-            AGG --> ORDER_CUST[orderCustomer Map]
-        end
-    end
-    
-    subgraph "Output Layer"
-        PROC -->|Main Output| MAIN[Q10Result Stream]
-        PROC -->|Side Output| LOG[Q10Update Changelog]
-        
-        MAIN --> TOP20[Top20ProcessFunction]
-        TOP20 --> OUT1[Top-20 Results]
-        LOG --> OUT2[Change Monitoring]
-    end
-```
-
-### Component Structure
+## Directory Structure
 
 ```
-src/main/java/q10/
-├── model/                    # Data models
-│   ├── Customer.java        # Customer dimension
-│   ├── LineItem.java        # LineItem fact table
-│   ├── Nation.java          # Nation dimension
-│   ├── Order.java           # Order dimension
-│   ├── Q10Result.java       # Final query result
-│   ├── Q10Update.java       # Delta changelog record
-│   └── UpdateEvent.java     # Generic update wrapper
-├── process/                 # Processing logic
-│   ├── Q10ProcessFunctionAJU.java      # Core AJU implementation
-│   ├── Top20ProcessFunction.java       # Top-20 ranking
-│   └── Top20ProcessFunction3att.java   # Alternative implementation
-├── sink/                    # Output handlers
-│   └── OutputTop20.java     # Top-20 result formatting
-├── source/                  # Data sources
-│   └── TpchQ10Source.java   # TPC-H data generator
-└── state/                   # State management
-    ├── CustomersState.java  # Customer state
-    ├── LineItemState.java   # LineItem state
-    ├── OrderState.java      # Order state
-    └── Q10JobAJU.java       # Main job coordinator
+latestIP/
+├── src/main/java/q10/                    # Main source code
+│   ├── model/                           # Data model classes
+│   │   ├── Customer.java
+│   │   ├── LineItem.java
+│   │   ├── Nation.java
+│   │   ├── Order.java
+│   │   ├── Q10Result.java
+│   │   ├── Q10Update.java
+│   │   └── UpdateEvent.java
+│   ├── process/                         # Processing logic
+│   │   ├── Q10ProcessFunctionAJU.java  # Core AJU implementation
+│   │   └── Top20ProcessFunction.java   # Top-20 ranking
+│   ├── source/                          # Data sources
+│   │   └── TpchQ10Source.java          # TPC-H data generator
+│   ├── sink/                            # Output handlers
+│   │   └── OutputTop20.java
+│   ├── state/                           # State management
+│   │   ├── CustomersState.java
+│   │   ├── LineItemState.java
+│   │   ├── OrderState.java
+│   │   └── Q10JobAJU.java              # Main job coordinator
+│   └── resources/
+├── resources/data/                      # TPC-H data files
+│   ├── customer.tbl
+│   ├── lineitem.tbl
+│   ├── nation.tbl
+│   └── orders.tbl
+├── pom.xml                             # Maven build configuration
+└── README.md                           # This documentation
 ```
 
-## Data Flow
+## Software Installation
 
-### Processing Pipeline
+### Step 1: Install Java 8
 
-```mermaid
-sequenceDiagram
-    participant Source as TpchQ10Source
-    participant Stream as Flink Stream
-    participant Processor as Q10ProcessFunctionAJU
-    participant Output as Result Sink
-    
-    Note over Source,Processor: Phase 1: Dimension Loading
-    Source->>Stream: Nation INSERT events
-    Stream->>Processor: Process dimension
-    Processor->>Processor: Store in Nation MapState
-    
-    Source->>Stream: Customer INSERT events
-    Stream->>Processor: Process dimension
-    Processor->>Processor: Store in Customer MapState
-    
-    Source->>Stream: Order INSERT events (filtered)
-    Stream->>Processor: Process with date filter
-    Processor->>Processor: Store order-customer mapping
-    
-    Note over Source,Processor: Phase 2: LineItem Stream Processing
-    loop FIFO Window Processing
-        Source->>Stream: LineItem INSERT event
-        Stream->>Processor: Process incremental update
-        Processor->>Processor: Update alive status
-        Processor->>Processor: Update aggregations
-        Processor->>Stream: Emit Q10Result
-        Processor->>Stream: Emit Q10Update changelog
-        
-        alt Window Full
-            Source->>Stream: Oldest LineItem DELETE
-            Stream->>Processor: Process removal
-            Processor->>Processor: Update counters
-        end
-    end
+```bash
+# For MacOS (using Homebrew)
+brew tap AdoptOpenJDK/openjdk
+brew install adoptopenjdk8
+
+# For Ubuntu
+sudo apt-get update
+sudo apt-get install openjdk-8-jdk
+
+# Verify installation
+java -version
+# Should output: java version "1.8.0_261"
 ```
 
-### Update Processing State Machine
+### Step 2: Install Maven
 
-```mermaid
-stateDiagram-v2
-    [*] --> ReceiveUpdate: LineItem Insert/Delete
-    ReceiveUpdate --> FilterCheck: Check returnFlag='R'
-    FilterCheck --> FKLookup: Find customer via orderKey
-    FKLookup --> CounterUpdate: Update liveLineItemCount
-    
-    CounterUpdate --> StateTransition: Evaluate count changes
-    
-    StateTransition --> OrderBecomesAlive: count 0→1
-    StateTransition --> OrderRemainsAlive: count >1 (alive)
-    StateTransition --> OrderBecomesDead: count 1→0
-    
-    OrderBecomesAlive --> UpdateCustomer: Increment liveOrderCount
-    UpdateCustomer --> AddRevenue: Add orderRevenue to customer
-    AddRevenue --> EmitResults: Generate Q10Result
-    
-    OrderRemainsAlive --> UpdateRevenue: Apply delta to customer
-    UpdateRevenue --> EmitResults
-    
-    OrderBecomesDead --> DecrementCount: Decrease liveOrderCount
-    DecrementCount --> RemoveRevenue: Subtract orderRevenue
-    RemoveRevenue --> EmitResults
-    
-    EmitResults --> LogChanges: Generate Q10Update
-    LogChanges --> [*]
+```bash
+# For MacOS
+brew install maven
+
+# For Ubuntu
+sudo apt-get install maven
+
+# Verify installation
+mvn -v
+# Should output: Apache Maven 3.6.3
 ```
 
-## AJU Algorithm Implementation
+### Step 3: Install Scala
 
-### Core Concepts
+```bash
+# For MacOS
+brew install scala@2.11
 
-1. **Alive Tuples**: Tuples that can produce join results
-2. **Foreign Key Acyclic Schema**: Exploits acyclic foreign-key relationships in TPC-H
-3. **Enclosures (λ)**: Measure of update sequence complexity
-4. **Incremental Maintenance**: Only process deltas, not full recomputation
+# For Ubuntu
+sudo apt-get install scala
 
-### State Variables in Q10ProcessFunctionAJU
+# Verify installation
+scala -version
+# Should output: Scala code runner version 2.11.8
+```
 
-| State Variable | Type | Description |
-|---------------|------|-------------|
-| `customers` | `MapState<Long, Customer>` | Customer dimension table |
-| `nations` | `MapState<Long, Nation>` | Nation dimension table |
-| `orderCustomer` | `MapState<Long, Long>` | orderKey → custKey mapping |
-| `orderRevenue` | `MapState<Long, Double>` | Revenue per order |
-| `orderAlive` | `MapState<Long, Boolean>` | Whether order can produce results |
-| `liveLineItemCount` | `MapState<Long, Integer>` | Count of qualifying lineitems per order |
-| `liveOrderCount` | `MapState<Long, Integer>` | Count of alive orders per customer |
-| `customerRevenue` | `MapState<Long, Double>` | Total revenue per customer |
+### Step 4: Download and Install Apache Flink
 
-### Algorithm Steps
+```bash
+# Download Flink 1.11.2
+wget https://archive.apache.org/dist/flink/flink-1.11.2/flink-1.11.2-bin-scala_2.11.tgz
 
-1. **Dimension Processing** (Nation, Customer, Order):
-   - Store directly in MapState
-   - Apply Q10 date filter to orders (`1993-10-01` to `1994-01-01`)
+# Extract the archive
+tar -xzf flink-1.11.2-bin-scala_2.11.tgz
 
-2. **LineItem Processing**:
-   ```
-   FOR EACH LineItem update (INSERT/DELETE):
-     IF returnFlag != 'R': SKIP
-     FIND custKey via orderCustomer mapping
-     UPDATE liveLineItemCount for order
-     CALCULATE revenue delta
-     UPDATE orderRevenue aggregation
-     
-     EVALUATE status transition:
-       Case 0→1: Order becomes alive
-         INCREMENT liveOrderCount for customer
-         ADD orderRevenue to customerRevenue
-         
-       Case >1: Order remains alive
-         APPLY revenue delta to customerRevenue
-         
-       Case 1→0: Order becomes dead
-         DECREMENT liveOrderCount for customer
-         SUBTRACT orderRevenue from customerRevenue
-   ```
+# Navigate to Flink directory
+cd flink-1.11.2
 
-3. **Result Generation**:
-   - For alive customers, emit Q10Result with current revenue
-   - Emit Q10Update changelog for monitoring
+# Start Flink cluster (local mode)
+./bin/start-cluster.sh
+
+# Verify Flink is running
+# Open browser and navigate to: http://localhost:8081
+```
+
+### Step 5: Install Python 3.8+
+
+```bash
+# For MacOS
+brew install python@3.8
+
+# For Ubuntu
+sudo apt-get install python3.8 python3-pip
+
+# Verify installation
+python3 --version
+# Should output: Python 3.8.5
+```
 
 ## Data Generation Process
 
-### TPC-H Data Files
+### Step 1: Obtain TPC-H Tools
 
-```
-resources/data/
-├── customer.tbl    # 150,000 records (scale factor 5)
-├── lineitem.tbl   # 29,998,701 records (scale factor 5)
-├── nation.tbl     # 25 records
-└── orders.tbl     # 7,500,000 records (scale factor 5)
-```
+1. Visit the official TPC website: http://tpc.org/tpc_documents_current_versions/current_specifications5.asp
+2. Download "TPC-H_Tools_v3.0.0.zip"
+3. Extract the archive to a local directory
 
-### Stream Generation Algorithm
+### Step 2: Configure and Build TPC-H Generator
 
-```java
-public void run(SourceContext<UpdateEvent<?>> ctx) throws Exception {
-    // Phase 1: Load dimension tables
-    loadNations(ctx);     // All 25 nations
-    loadCustomers(ctx);   // All 150,000 customers
-    loadOrders(ctx);      // Filtered orders (date range)
-    
-    // Phase 2: LineItem stream with FIFO window
-    Deque<LineItem> buffer = new ArrayDeque<>();
-    
-    // Warm-up: Insert initial 200,000 items
-    for (int i = 0; i < WARMUP_INSERT; i++) {
-        LineItem li = generateLineItem();
-        ctx.collect(INSERT, "lineitem", li);
-        buffer.add(li);
-    }
-    
-    // Streaming: Insert new + delete old
-    while (hasData()) {
-        // Insert new record
-        LineItem newItem = generateLineItem();
-        ctx.collect(INSERT, "lineitem", newItem);
-        buffer.add(newItem);
-        
-        // Maintain FIFO window (100,000 items)
-        if (buffer.size() > WINDOW_SIZE) {
-            LineItem oldItem = buffer.removeFirst();
-            ctx.collect(DELETE, "lineitem", oldItem);
-        }
-    }
-}
+```bash
+# Navigate to dbgen directory
+cd /path/to/TPC-H_Tools/dbgen
+
+# Copy the makefile template
+cp makefile.suite makefile
+
+# Edit makefile with appropriate settings
+# For Linux/MacOS, use these settings:
+CC      = gcc
+DATABASE= ORACLE
+MACHINE = LINUX
+WORKLOAD = TPCH
+
+# For Windows (if supported):
+# MACHINE = WIN32
+# DATABASE = SQLSERVER
+
+# Build the dbgen executable
+make
+
+# Verify the executable was created
+ls -la dbgen
+# Should see executable file: dbgen
 ```
 
-### Data Format Examples
+### Step 3: Generate TPC-H Data
 
-**Nation Record:**
+```bash
+# Generate data with scale factor 5 (approximately 5GB total)
+./dbgen -s 5 -vf
+
+# The -s parameter controls the scale factor:
+# -s 1: ~1GB data
+# -s 5: ~5GB data (recommended for demo)
+# -s 10: ~10GB data
+
+# This will generate 8 .tbl files:
+# customer.tbl, lineitem.tbl, nation.tbl, orders.tbl,
+# part.tbl, partsupp.tbl, region.tbl, supplier.tbl
+```
+
+### Step 4: Prepare Data for AJU Demo
+
+```bash
+# Create data directory in the project
+mkdir -p latestIP/src/main/resources/data
+
+# Copy only the needed tables for Q10
+cp /path/to/TPC-H_Tools/dbgen/customer.tbl latestIP/src/main/resources/data/
+cp /path/to/TPC-H_Tools/dbgen/lineitem.tbl latestIP/src/main/resources/data/
+cp /path/to/TPC-H_Tools/dbgen/nation.tbl latestIP/src/main/resources/data/
+cp /path/to/TPC-H_Tools/dbgen/orders.tbl latestIP/src/main/resources/data/
+
+# Verify file sizes (scale factor 5)
+ls -lh latestIP/src/main/resources/data/
+# Expected:
+# -rw-r--r--  1 user  staff   113M Jan 1 12:00 customer.tbl
+# -rw-r--r--  1 user  staff   2.9G Jan 1 12:00 lineitem.tbl
+# -rw-r--r--  1 user  staff   2.3K Jan 1 12:00 nation.tbl
+# -rw-r--r--  1 user  staff   1.1G Jan 1 12:00 orders.tbl
+```
+
+### Data File Formats
+
+**nation.tbl (example):**
 ```
 0|ALGERIA|0| haggle. carefully final deposits detect slyly agai
+1|ARGENTINA|1|al foxes promise slyly according to the regular accounts. bold requests alon
+2|BRAZIL|1|y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special 
 ```
 
-**Customer Record:**
+**customer.tbl (example):**
 ```
 1|Customer#000000001|IVhzIApeRb ot,c,E|15|25-989-741-2988|711.56|BUILDING|to the even, regular platelets. regular, ironic epitaphs nag e
+2|Customer#000000002|XSTf4,NCwDVaWNe6tEgvwfmRchLXak|13|23-768-687-3665|121.65|AUTOMOBILE|l accounts. blithely ironic theodolites integrate boldly: caref
 ```
 
-**Order Record:**
+**orders.tbl (example):**
 ```
-1|36901|O|173665.47|1996-01-02|5-LOW|Clerk#000000951|0|nstructions sleep furiously among
+1|36901|O|173665.47|1996-01-02|5-LOW|Clerk#000000951|0|nstructions sleep furiously among 
+2|78002|O|46929.18|1996-12-01|1-URGENT|Clerk#000000880|0| foxes. pending accounts at the pending, silent asymptot
 ```
 
-**LineItem Record:**
+**lineitem.tbl (example):**
 ```
 1|1552|106170|1|17|24710.35|0.04|0.02|N|O|1996-03-13|1996-02-12|1996-03-22|DELIVER IN PERSON|TRUCK|egular courts above the
+1|67|107140|2|36|13309.60|0.09|0.06|N|O|1996-04-12|1996-02-28|1996-04-20|TAKE BACK RETURN|MAIL|ly final dependencies: slyly bold 
 ```
 
-## Performance Characteristics
+## Running the Demo
 
-### Theoretical Performance
-
-| Metric | Value | Description |
-|--------|-------|-------------|
-| **Update Time** | O(λ) amortized | λ = enclosures of update sequence |
-| **FIFO Sequences** | O(1) amortized | λ = 1 for FIFO update patterns |
-| **Enumeration Delay** | O(1) constant | Immediate result access |
-| **Space Complexity** | O(|db|) linear | Proportional to database size |
-
-### Experimental Results (from Paper)
-
-| System | Performance vs AJU | Notes |
-|--------|-------------------|-------|
-| **Dynamic Yannakakis** | 2-10× slower | On α-acyclic queries |
-| **Trill** | 2-80× slower | Standard change propagation |
-| **DBToaster** | 5-800× slower | Higher-order IVM |
-| **Memory Usage** | 1-30% of Trill | No intermediate views |
-
-### Scalability
-
-```mermaid
-graph LR
-    subgraph "Single Worker"
-        W1[Worker 1] --> P1[Process Q10]
-    end
-    
-    subgraph "Distributed Cluster"
-        W2[Worker 1] -->|Partition 1| P2[Partial Results]
-        W3[Worker 2] -->|Partition 2| P3[Partial Results]
-        W4[Worker 3] -->|Partition 3| P4[Partial Results]
-        P2 --> M[Merge Results]
-        P3 --> M
-        P4 --> M
-        M --> F[Final Top-20]
-    end
-```
-
-**Speedup Characteristics:**
-- For k-way join: speedup ∝ p^(1/k) (sublinear in workers)
-- Communication overhead increases with more workers
-- Flink manages fault tolerance and state distribution
-
-## Usage Guide
-
-### Prerequisites
+### Step 1: Build the Project
 
 ```bash
-# Required Software
-- Java 8+
-- Apache Flink 1.6.1+
-- Maven 3.2+
-- TPC-H data generator
-```
-
-### Building and Running
-
-```bash
-# 1. Clone and build
-git clone <repository>
+# Navigate to project root
 cd latestIP
+
+# Build the project using Maven
 mvn clean package
 
-# 2. Generate TPC-H data (scale factor 5)
-./dbgen -s 5 -f
+# Expected output:
+# [INFO] Building jar: /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar
+# [INFO] BUILD SUCCESS
 
-# 3. Run AJU implementation
-mvn exec:java -Dexec.mainClass="q10.Q10JobAJU"
-
-# 4. Run with specific parallelism
-mvn exec:java -Dexec.mainClass="q10.Q10JobAJU" \
-    -Dexec.args="--parallelism 4"
+# Verify the JAR file was created
+ls -lh target/*.jar
 ```
 
-### Configuration Options
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `WARMUP_INSERT` | 200,000 | Initial LineItems to insert |
-| `WINDOW_SIZE` | 100,000 | FIFO window size |
-| `parallelism` | 1 | Flink parallelism |
-| `checkpoint.interval` | 60000ms | Fault tolerance interval |
-
-### Output Format
-
-**Q10Result (Main Output):**
-```json
-{
-  "custKey": 12345,
-  "name": "Customer#000012345",
-  "nation": "UNITED STATES",
-  "acctBal": 1234.56,
-  "address": "123 Main St",
-  "phone": "25-123-456-7890",
-  "comment": "Regular customer",
-  "revenue": 56789.12
-}
-```
-
-**Q10Update (Changelog):**
-```json
-{
-  "custKey": 12345,
-  "name": "Customer#000012345",
-  "nation": "UNITED STATES",
-  "oldRevenue": 50000.00,
-  "newRevenue": 56789.12,
-  "delta": 6789.12,
-  "kind": "UPDATE"
-}
-```
-
-## Technical Details
-
-### Flink Integration
-
-```java
-// Job configuration
-StreamExecutionEnvironment env = 
-    StreamExecutionEnvironment.getExecutionEnvironment();
-
-env.enableCheckpointing(60000);  // Fault tolerance
-env.setParallelism(4);           // Distributed processing
-
-// State management
-MapStateDescriptor<Long, Customer> customerDesc = 
-    new MapStateDescriptor<>("customers", Long.class, Customer.class);
-MapState<Long, Customer> customers = 
-    getRuntimeContext().getMapState(customerDesc);
-```
-
-### AJU-Specific Optimizations
-
-1. **Minimal State**:
-   - Only store necessary foreign key mappings
-   - No materialization of intermediate joins
-   - Incremental aggregation maintenance
-
-2. **Lazy Evaluation**:
-   - Only compute results when needed
-   - Defer expensive operations
-   - Cache frequently accessed data
-
-3. **Memory Management**:
-   - Use Flink's managed state
-   - Automatic serialization/deserialization
-   - Efficient hash-based indexing
-
-### Query 10 Original SQL
-
-```sql
-SELECT 
-    c_custkey, 
-    c_name, 
-    SUM(l_extendedprice * (1 - l_discount)) AS revenue,
-    c_acctbal, 
-    n_name, 
-    c_address, 
-    c_phone, 
-    c_comment
-FROM 
-    customer, 
-    orders, 
-    lineitem, 
-    nation
-WHERE 
-    c_custkey = o_custkey
-    AND l_orderkey = o_orderkey
-    AND o_orderdate >= DATE '1993-10-01'
-    AND o_orderdate < DATE '1994-01-01'
-    AND l_returnflag = 'R'
-    AND c_nationkey = n_nationkey
-GROUP BY 
-    c_custkey, 
-    c_name, 
-    c_acctbal, 
-    c_phone, 
-    n_name, 
-    c_address, 
-    c_comment
-ORDER BY 
-    revenue DESC;
-```
-
-### References
-
-1. Wang, Q., & Yi, K. (2020). *Maintaining Acyclic Foreign-Key Joins under Updates*. SIGMOD 2020.
-2. TPC-H Benchmark Specification v3.0.0
-3. Apache Flink Documentation
-4. Idris, M., et al. (2017). *The Dynamic Yannakakis Algorithm*. SIGMOD 2017.
-
-### Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Out of Memory | Increase JVM heap size: `-Xmx8g` |
-| Slow Processing | Check λ value of update sequence |
-| State Too Large | Enable RocksDB state backend |
-| Data Skew | Adjust HyperCube partitioning dimensions |
-
-### Monitoring
+### Step 2: Start Flink Cluster
 
 ```bash
-# Access Flink Web UI
-http://localhost:8081
+# Navigate to Flink installation directory
+cd /path/to/flink-1.11.2
 
-# Monitor throughput
-tail -f logs/flink-*.out
+# Start Flink in local mode
+./bin/start-cluster.sh
 
-# Check state size
-jcmd <pid> GC.heap_info
+# Check if Flink is running
+./bin/flink list
+# Should show no running jobs initially
+
+# Monitor Flink Web UI: http://localhost:8081
 ```
 
-This implementation demonstrates how AJU algorithm achieves efficient incremental query maintenance with theoretical guarantees while being practical for real-world streaming scenarios.
+### Step 3: Run the AJU Job
+
+```bash
+# Submit the job to Flink
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar \
+  --parallelism 1
+
+# Alternative: Run with custom parameters
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar \
+  --parallelism 4 \
+  --windowSize 50000 \
+  --warmupInsert 100000
+```
+
+### Step 4: Monitor Job Execution
+
+```bash
+# Monitor job status
+./bin/flink list
+# Output: RUNNING or FINISHED
+
+# View Flink Web UI for detailed metrics:
+# 1. Open browser to http://localhost:8081
+# 2. Click on "Running Jobs"
+# 3. Select your job to see:
+#    - Throughput metrics
+#    - State size
+#    - Task manager details
+#    - Watermark progression
+
+# Check job logs
+tail -f /path/to/flink-1.11.2/log/flink-*.out
+```
+
+### Step 5: View Results
+
+The job produces two output streams:
+
+1. **Top-20 Results** (printed to console):
+```
+TOP20> Q10Result{custKey=12345, name='Customer#000012345', ... revenue=56789.12}
+TOP20> Q10Result{custKey=67890, name='Customer#000067890', ... revenue=45678.90}
+...
+```
+
+2. **Change Log** (printed to console):
+```
+Q10-CHANGELOG> Q10Update{custKey=12345, oldRevenue=50000.0, newRevenue=56789.12, delta=6789.12, kind=UPDATE}
+```
+
+## Running with Different Configurations
+
+### Configuration via Command Line
+
+```bash
+# Basic run with default parameters
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
+
+# Run with increased parallelism
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 4
+
+# Run with custom data parameters
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar \
+  --windowSize 200000 \
+  --warmupInsert 400000 \
+  --scaleFactor 10
+
+# Run in detached mode
+./bin/flink run -d -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
+```
+
+### Configuration via Environment Variables
+
+```bash
+# Set environment variables before running
+export FLINK_PARALLELISM=4
+export WINDOW_SIZE=100000
+export WARMUP_INSERT=200000
+
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
+```
+
+## Performance Testing
+
+### Run with Different Scale Factors
+
+```bash
+# Test with small dataset (debug)
+./dbgen -s 0.1 -vf
+cp *.tbl latestIP/src/main/resources/data/
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar
+
+# Test with medium dataset
+./dbgen -s 1 -vf
+cp *.tbl latestIP/src/main/resources/data/
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 2
+
+# Test with large dataset
+./dbgen -s 10 -vf
+cp *.tbl latestIP/src/main/resources/data/
+./bin/flink run -c q10.Q10JobAJU q10-aju-1.0-SNAPSHOT.jar --parallelism 8
+```
+
+### Monitor Resource Usage
+
+```bash
+# Monitor CPU usage
+top -o cpu
+
+# Monitor memory usage
+jstat -gc <flink_pid> 1000
+
+# Monitor disk I/O
+iostat -x 1
+
+# Monitor network
+iftop -i lo0
+```
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### Issue 1: Java Version Mismatch
+```
+Error: Unsupported major.minor version 52.0
+```
+**Solution:**
+```bash
+# Ensure Java 8 is being used
+java -version
+# Should show 1.8.x
+
+# Set JAVA_HOME explicitly
+export JAVA_HOME=$(/usr/libexec/java_home -v 1.8)
+```
+
+#### Issue 2: Flink Cluster Not Starting
+```
+Error: Could not start Flink cluster
+```
+**Solution:**
+```bash
+# Check if port 8081 is already in use
+lsof -i :8081
+
+# Kill existing process if needed
+kill -9 <pid>
+
+# Start with clean state
+./bin/stop-cluster.sh
+rm -rf /tmp/flink-*
+./bin/start-cluster.sh
+```
+
+#### Issue 3: Out of Memory Errors
+```
+java.lang.OutOfMemoryError: Java heap space
+```
+**Solution:**
+```bash
+# Increase heap size in Flink configuration
+# Edit flink-1.11.2/conf/flink-conf.yaml
+
+# Add or modify:
+taskmanager.memory.process.size: 4096m
+jobmanager.memory.process.size: 2048m
+
+# Restart Flink
+./bin/stop-cluster.sh
+./bin/start-cluster.sh
+```
+
+#### Issue 4: Data Generation Issues
+```
+dbgen: command not found
+```
+**Solution:**
+```bash
+# Ensure makefile is properly configured
+cd /path/to/TPC-H_Tools/dbgen
+make clean
+make
+
+# Check for compilation errors
+gcc --version
+# Should be 4.8+ for Linux, clang for MacOS
+```
+
+#### Issue 5: Missing Data Files
+```
+java.io.FileNotFoundException: data/customer.tbl
+```
+**Solution:**
+```bash
+# Ensure data files are in correct location
+ls -la src/main/resources/data/
+
+# If using IDE, mark resources directory
+# For IntelliJ: File -> Project Structure -> Modules -> Mark as Resources
+```
+
+### Debug Mode
+
+```bash
+# Run Flink job with debug logging
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  q10-aju-1.0-SNAPSHOT.jar \
+  --logLevel DEBUG
+
+# Check detailed logs
+tail -f /path/to/flink-1.11.2/log/flink-*.log
+
+# Enable remote debugging
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  q10-aju-1.0-SNAPSHOT.jar \
+  -Denv.java.opts="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"
+```
+
+## Configuration Options
+
+### Runtime Parameters
+
+| Parameter | Default | Description | Command Line Argument |
+|-----------|---------|-------------|----------------------|
+| `parallelism` | 1 | Number of parallel task slots | `--parallelism 4` |
+| `windowSize` | 100000 | FIFO window size for LineItems | `--windowSize 200000` |
+| `warmupInsert` | 200000 | Initial LineItems to insert | `--warmupInsert 400000` |
+| `scaleFactor` | 5 | TPC-H scale factor (data size) | `--scaleFactor 10` |
+| `logLevel` | INFO | Logging level (DEBUG, INFO, WARN) | `--logLevel DEBUG` |
+| `checkpointInterval` | 60000 | Fault tolerance checkpoint interval (ms) | `--checkpointInterval 30000` |
+
+### Memory Configuration
+
+```yaml
+# flink-conf.yaml modifications for optimal performance
+taskmanager.memory.process.size: 4096m
+taskmanager.numberOfTaskSlots: 4
+jobmanager.memory.process.size: 2048m
+
+# For large datasets (scale factor 10+)
+taskmanager.memory.process.size: 8192m
+taskmanager.memory.managed.size: 4096m
+```
+
+### Performance Tuning
+
+```bash
+# Optimize for throughput
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  q10-aju-1.0-SNAPSHOT.jar \
+  --bufferTimeout 0 \
+  --parallelism $(nproc)
+
+# Optimize for low latency
+./bin/flink run \
+  -c q10.Q10JobAJU \
+  q10-aju-1.0-SNAPSHOT.jar \
+  --bufferTimeout 10 \
+  --parallelism 1
+```
+
+## Quick Start Summary
+
+### For First-Time Users
+
+```bash
+# 1. Install dependencies
+brew install java8 maven scala
+
+# 2. Download and start Flink
+wget https://archive.apache.org/dist/flink/flink-1.11.2/flink-1.11.2-bin-scala_2.11.tgz
+tar -xzf flink-1.11.2-bin-scala_2.11.tgz
+cd flink-1.11.2
+./bin/start-cluster.sh
+
+# 3. Generate TPC-H data
+cd /path/to/TPC-H_Tools/dbgen
+make
+./dbgen -s 1 -vf
+cp customer.tbl lineitem.tbl nation.tbl orders.tbl /path/to/latestIP/src/main/resources/data/
+
+# 4. Build and run the demo
+cd /path/to/latestIP
+mvn clean package
+cd /path/to/flink-1.11.2
+./bin/flink run -c q10.Q10JobAJU /path/to/latestIP/target/q10-aju-1.0-SNAPSHOT.jar
+
+# 5. Monitor results
+# Check console output or visit http://localhost:8081
+```
+
+### Estimated Time Requirements
+
+| Step | Time Estimate | Disk Space |
+|------|---------------|------------|
+| Software Installation | 15-30 minutes | 2GB |
+| TPC-H Data Generation (scale 5) | 5-10 minutes | 5GB |
+| Project Build | 2-3 minutes | 500MB |
+| Job Execution (scale 5) | 10-20 minutes | 1GB heap |
+
+This setup guide provides all necessary steps to run the TPC-H Q10 AJU implementation from scratch. The system demonstrates efficient incremental query maintenance with theoretical guarantees while being practical for real-world streaming scenarios.

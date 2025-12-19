@@ -53,7 +53,7 @@ public class OutputTop20 {
         FileSink<String> top20Sink =
                 FileSink
                         .forRowFormat(
-                                new Path("file:///C:/Users/HP/Desktop/IPproject/latestIP/output/top20"),
+                                new Path("output/top20"),
                                 new SimpleStringEncoder<String>("UTF-8")
                         )
                         .build();
